@@ -1,7 +1,7 @@
 # 💰 Personal Lending & Debt Management Web App
 
 <p align="center">
-  <img src="src/app/icon.png" alt="App Logo" width="100" height="100" />
+  <img src="src/app/favicon.ico" alt="App Logo" width="100" height="100" />
 </p>
 
 <p align="center">
