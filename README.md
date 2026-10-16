@@ -28,10 +28,12 @@ A lightweight, automated personal debt and loan management web app built with Ne
    cd lending-management-web
    npm install
 2. Configure .env:
-  DATABASE_URL="your_neon_postgresql_url"
-  ADMIN_PASSWORD="your_admin_password"
-  CRON_SECRET="your_random_secret"
-3. Sync Database & Run:
-  npx prisma db push
-  npm run dev
-  Open http://localhost:3000
+   ```
+   DATABASE_URL="your_neon_postgresql_url"
+   ADMIN_PASSWORD="your_admin_password"
+   CRON_SECRET="your_random_secret"
+4. Sync Database & Run:
+   ```
+   npx prisma db push
+   npm run dev
+   Open http://localhost:3000
