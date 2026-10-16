@@ -1,0 +1,84 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum LoanStatus {
+  ACTIVE
+  PAID_OFF
+  BAD_DEBT
+}
+
+enum InterestType {
+  DAILY
+  MONTHLY
+}
+
+enum TransactionType {
+  INTEREST_ACCRUAL
+  REPAYMENT
+  TOP_UP
+}
+
+model Borrower {
+  id        String   @id @default(uuid())
+  fullName  String
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  loans     Loan[]
+}
+
+model Loan {
+  id                  String         @id @default(uuid())
+  borrowerId          String
+  borrower            Borrower       @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+
+  originalPrincipal   Decimal        @db.Decimal(15, 2)
+  remainingPrincipal  Decimal        @db.Decimal(15, 2)
+  
+  interestType        InterestType   @default(DAILY)
+  dailyInterestAmount Decimal?       @db.Decimal(15, 2)
+  monthlyInterestRate Decimal?       @db.Decimal(5, 2)
+  paymentDueDay       Int?           @default(1)
+
+  accruedInterest     Decimal        @default(0) @db.Decimal(15, 2)
+  startDate           DateTime       @default(now())
+  status              LoanStatus     @default(ACTIVE)
+  notes               String?
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  transactions        Transaction[]
+  auditLogs           LoanAuditLog[]
+}
+
+model LoanAuditLog {
+  id        String   @id @default(uuid())
+  loanId    String
+  loan      Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  action    String
+  fieldName String
+  oldValue  String?
+  newValue  String?
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model Transaction {
+  id                String          @id @default(uuid())
+  loanId            String
+  loan              Loan            @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  type              TransactionType
+  amount            Decimal         @db.Decimal(15, 2)
+  deductedPrincipal Decimal         @default(0) @db.Decimal(15, 2)
+  deductedInterest  Decimal         @default(0) @db.Decimal(15, 2)
+  paymentMethod     String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+}
