@@ -1,10 +1,15 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { logoutAction } from "@/app/actions/auth";
+import { syncLoanInterest } from "@/lib/sync-loan-interest";
+import { connection } from "next/server";
 
 export const instant = false;
 
 export default async function DashboardPage() {
+  await connection();
+  await syncLoanInterest();
+
   const loans = await prisma.loan.findMany({
     include: {
       borrower: true,

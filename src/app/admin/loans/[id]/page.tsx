@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import RepaymentForm from "./RepaymentForm";
 import { deletePaidOffLoanAction } from "@/app/actions/payment";
+import { syncLoanInterest } from "@/lib/sync-loan-interest";
+import { connection } from "next/server";
 
 export const instant = false;
 
@@ -11,7 +13,10 @@ export default async function LoanDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await connection();
   const { id } = await params;
+
+  await syncLoanInterest(id);
 
   const loan = await prisma.loan.findUnique({
     where: { id },

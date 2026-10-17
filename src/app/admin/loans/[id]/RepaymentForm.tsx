@@ -28,7 +28,6 @@ export default function RepaymentForm({
   dailyInterestAmount,
   monthlyInterestRate,
 }: RepaymentFormProps) {
-  // Bổ sung tab "ADJUST"
   const [activeTab, setActiveTab] = useState<"PAY" | "TOP_UP" | "ADJUST">("PAY");
 
   // State form thu tiền
@@ -36,7 +35,7 @@ export default function RepaymentForm({
   const [amountText, setAmountText] = useState("");
   const [target, setTarget] = useState<"INTEREST_ONLY" | "PRINCIPAL_ONLY" | "AUTO">("AUTO");
 
-  // State form vay thêm tiền & đổi lãi
+  // State form vay thêm tiền & đổi lãi tương lai
   const [topUpState, topUpFormAction, isTopUpPending] = useActionState(topUpLoanAction, null);
   const [topUpText, setTopUpText] = useState("");
   const [newDailyText, setNewDailyText] = useState(
@@ -46,7 +45,7 @@ export default function RepaymentForm({
     monthlyInterestRate > 0 ? String(monthlyInterestRate) : ""
   );
 
-  // State form sửa số tiền do nhập nhầm
+  // State form sửa nhầm gốc & tính lại toàn bộ lãi
   const [adjustState, adjustFormAction, isAdjustPending] = useActionState(
     adjustLoanAmountsAction,
     null
@@ -54,11 +53,11 @@ export default function RepaymentForm({
   const [editOriginalText, setEditOriginalText] = useState(
     new Intl.NumberFormat("vi-VN").format(originalPrincipal)
   );
-  const [editRemainingText, setEditRemainingText] = useState(
-    new Intl.NumberFormat("vi-VN").format(remainingPrincipal)
+  const [editDailyRateText, setEditDailyRateText] = useState(
+    dailyInterestAmount > 0 ? new Intl.NumberFormat("vi-VN").format(dailyInterestAmount) : ""
   );
-  const [editInterestText, setEditInterestText] = useState(
-    new Intl.NumberFormat("vi-VN").format(accruedInterest)
+  const [editMonthlyRateText, setEditMonthlyRateText] = useState(
+    monthlyInterestRate > 0 ? String(monthlyInterestRate) : ""
   );
 
   const formatNumber = (val: string) => {
@@ -153,10 +152,11 @@ export default function RepaymentForm({
               />
             </div>
 
+            {/* MỤC ĐÍCH TRỪ GIỮ NGUYÊN NGUYÊN BẢN THEO YÊU CẦU */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">Mục đích trừ</label>
               <div className="space-y-2 text-xs">
-                                <label className="flex items-center space-x-2 p-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50">
+                <label className="flex items-center space-x-2 p-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50">
                   <input
                     type="radio"
                     name="target"
@@ -322,13 +322,13 @@ export default function RepaymentForm({
         </div>
       )}
 
-      {/* TAB 3: SỬA SỐ TIỀN GỐC NHẬP NHẦM */}
+      {/* TAB 3: SỬA SỐ TIỀN GỐC & MỨC LÃI (TÍNH HỒI TỐ TỪ NGÀY GIẢI NGÂN) */}
       {activeTab === "ADJUST" && (
         <div className="space-y-4">
           <div>
-            <h2 className="font-bold text-amber-800 text-sm">Sửa Tiền Gốc Ban Đầu</h2>
+            <h2 className="font-bold text-amber-800 text-sm">Sửa Gốc & Mức Lãi Thỏa Thuận</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Hệ thống sẽ giữ nguyên tiền lãi và tự động cấn trừ các khoản tiền khách đã trả trước đó.
+              Hệ thống sẽ tính lại toàn bộ lãi từ ngày giải ngân đến nay theo mức lãi mới, tự trừ tiền khách đã trả.
             </p>
           </div>
 
@@ -340,13 +340,14 @@ export default function RepaymentForm({
 
           {adjustState?.success && (
             <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-semibold">
-              Đã đính chính tiền gốc thành công!
+              Đã cập nhật gốc & tính lại toàn bộ tiền lãi thành công!
             </div>
           )}
 
           <form action={adjustFormAction} className="space-y-3.5">
             <input type="hidden" name="loanId" value={loanId} />
 
+            {/* 1. Tiền gốc ban đầu */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 Tiền gốc ban đầu đúng (VNĐ) <span className="text-rose-500">*</span>
@@ -361,10 +362,57 @@ export default function RepaymentForm({
                 required
               />
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Hiện tại đang lưu: <strong>{originalPrincipal.toLocaleString("vi-VN")} đ</strong>
+                Hiện tại: <strong>{originalPrincipal.toLocaleString("vi-VN")} đ</strong>
               </span>
             </div>
 
+            {/* 2. Mức lãi thỏa thuận mới (Tính hồi tố từ ngày giải ngân) */}
+            {interestType === "DAILY" ? (
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1">
+                <label className="block text-xs font-bold text-amber-900">
+                  Mức lãi ngày đúng (VNĐ/ngày) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="newDailyInterest"
+                    value={editDailyRateText}
+                    onChange={(e) => setEditDailyRateText(formatNumber(e.target.value))}
+                    placeholder="VD: 50.000"
+                    className="w-full px-3 py-1.5 pr-12 rounded-lg border border-slate-300 bg-white text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                  <span className="absolute right-3 top-2 text-[10px] text-slate-400 font-bold">VNĐ</span>
+                </div>
+                <span className="text-[11px] text-amber-700 block">
+                  Hiện tại: <strong>{dailyInterestAmount.toLocaleString("vi-VN")} đ/ngày</strong>. Lãi sẽ được nhân lại từ ngày giải ngân đến hôm nay.
+                </span>
+              </div>
+            ) : (
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1">
+                <label className="block text-xs font-bold text-amber-900">
+                  Lãi suất tháng đúng (%) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    name="newMonthlyRate"
+                    value={editMonthlyRateText}
+                    onChange={(e) => setEditMonthlyRateText(e.target.value)}
+                    placeholder="VD: 5.0"
+                    className="w-full px-3 py-1.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                  <span className="absolute right-3 top-2 text-[10px] text-slate-400 font-bold">%</span>
+                </div>
+                <span className="text-[11px] text-amber-700 block">
+                  Hiện tại: <strong>{monthlyInterestRate}%/tháng</strong>.
+                </span>
+              </div>
+            )}
+
+            {/* 3. Lý do sửa */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 Lý do chỉnh sửa
@@ -372,7 +420,7 @@ export default function RepaymentForm({
               <input
                 type="text"
                 name="reason"
-                defaultValue="Sửa nhầm tiền gốc ban đầu"
+                defaultValue="Sửa nhầm tiền gốc / mức lãi ban đầu"
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
@@ -382,7 +430,7 @@ export default function RepaymentForm({
               disabled={isAdjustPending}
               className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 text-white font-bold text-xs shadow transition-all"
             >
-              {isAdjustPending ? "Đang cập nhật..." : "Lưu Tiền Gốc Đúng"}
+              {isAdjustPending ? "Đang tính toán lại..." : "Lưu & Tính Lại Toàn Bộ Lãi"}
             </button>
           </form>
         </div>

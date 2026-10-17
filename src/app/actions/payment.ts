@@ -258,14 +258,16 @@ export async function deletePaidOffLoanAction(formData: FormData) {
   redirect("/");
 }
 
-// 4. Action Sửa Tiền Gốc Ban Đầu (Tự động trừ số tiền khách đã trả)
+// 4. Action Sửa Tiền Gốc & Mức Lãi (Tự động tính lại gốc và lãi từ ngày giải ngân)
 export async function adjustLoanAmountsAction(
   prevState: ActionState | null,
   formData: FormData
 ): Promise<ActionState> {
   const loanId = formData.get("loanId") as string;
   const rawOriginal = formData.get("originalPrincipal") as string;
-  const reason = (formData.get("reason") as string)?.trim() || "Đính chính tiền gốc nhập nhầm";
+  const rawNewDaily = formData.get("newDailyInterest") as string;
+  const rawNewMonthly = formData.get("newMonthlyRate") as string;
+  const reason = (formData.get("reason") as string)?.trim() || "Đính chính tiền gốc / mức lãi";
 
   const newOriginal = Number(rawOriginal?.replace(/\D/g, ""));
   if (!loanId || isNaN(newOriginal) || newOriginal <= 0) {
@@ -279,40 +281,94 @@ export async function adjustLoanAmountsAction(
         include: { transactions: true },
       });
 
-      // 1. Tính tổng số tiền gốc mà khách đã từng trả từ trước tới nay
+      // --- A. TÍNH LẠI TIỀN GỐC CÒN LẠI ---
       const totalRepaidPrincipal = loan.transactions
         .filter((t) => t.type === "REPAYMENT")
         .reduce((sum, t) => sum + Number(t.deductedPrincipal), 0);
 
-      // 2. Tính tổng số tiền vay thêm (nếu có)
       const totalTopUp = loan.transactions
         .filter((t) => t.type === "TOP_UP")
         .reduce((sum, t) => sum + Number(t.amount), 0);
 
-      // Gốc còn lại = Gốc ban đầu mới + Tiền vay thêm - Tiền gốc đã trả
       const newRemaining = Math.max(0, newOriginal + totalTopUp - totalRepaidPrincipal);
 
-      const oldOriginal = Number(loan.originalPrincipal);
-      const oldRemaining = Number(loan.remainingPrincipal);
+      // --- B. TÍNH LẠI TIỀN LÃI TỪ NGÀY GIẢI NGÂN ĐẾN HIỆN TẠI ---
+      const startMidnight = new Date(loan.startDate);
+      startMidnight.setHours(0, 0, 0, 0);
 
-      // 3. Cập nhật lại khoản vay
+      const todayMidnight = new Date();
+      todayMidnight.setHours(0, 0, 0, 0);
+
+      const diffTime = Math.max(0, todayMidnight.getTime() - startMidnight.getTime());
+      const daysPassed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+      // Lấy mức lãi mới (nếu có nhập) hoặc giữ nguyên mức cũ
+      let updatedDailyAmount = loan.dailyInterestAmount;
+      let updatedMonthlyRate = loan.monthlyInterestRate;
+      let currentDailyRateNum = 0;
+
+      if (loan.interestType === "DAILY") {
+        if (rawNewDaily) {
+          const parsedDaily = Number(rawNewDaily.replace(/\D/g, ""));
+          if (parsedDaily > 0) {
+            updatedDailyAmount = new Prisma.Decimal(parsedDaily);
+            currentDailyRateNum = parsedDaily;
+          } else {
+            currentDailyRateNum = Number(loan.dailyInterestAmount || 0);
+          }
+        } else {
+          currentDailyRateNum = Number(loan.dailyInterestAmount || 0);
+        }
+      } else {
+        if (rawNewMonthly) {
+          const parsedMonthly = parseFloat(rawNewMonthly);
+          if (!isNaN(parsedMonthly) && parsedMonthly > 0) {
+            updatedMonthlyRate = new Prisma.Decimal(parsedMonthly);
+            currentDailyRateNum = (newOriginal * parsedMonthly) / (100 * 30);
+          } else {
+            const currentMonthlyNum = Number(loan.monthlyInterestRate || 0);
+            currentDailyRateNum = (newOriginal * currentMonthlyNum) / (100 * 30);
+          }
+        } else {
+          const currentMonthlyNum = Number(loan.monthlyInterestRate || 0);
+          currentDailyRateNum = (newOriginal * currentMonthlyNum) / (100 * 30);
+        }
+      }
+
+      // Tổng lãi phát sinh từ ngày giải ngân đến nay theo mức lãi mới
+      const totalGrossInterest = Math.round(daysPassed * currentDailyRateNum);
+
+      // Tổng tiền lãi khách đã từng trả
+      const totalRepaidInterest = loan.transactions
+        .filter((t) => t.type === "REPAYMENT")
+        .reduce((sum, t) => sum + Number(t.deductedInterest), 0);
+
+      // Tiền lãi nợ thực tế sau khi tính hồi tố và trừ lãi đã trả
+      const newAccruedInterest = Math.max(0, totalGrossInterest - totalRepaidInterest);
+
+      const isPaidOff = newRemaining === 0 && newAccruedInterest === 0;
+
+      // --- C. CẬP NHẬT KHOẢN VAY ---
       await tx.loan.update({
         where: { id: loanId },
         data: {
           originalPrincipal: new Prisma.Decimal(newOriginal),
           remainingPrincipal: new Prisma.Decimal(newRemaining),
-          status: newRemaining === 0 && Number(loan.accruedInterest) === 0 ? "PAID_OFF" : "ACTIVE",
+          dailyInterestAmount: updatedDailyAmount,
+          monthlyInterestRate: updatedMonthlyRate,
+          accruedInterest: new Prisma.Decimal(newAccruedInterest),
+          status: isPaidOff ? "PAID_OFF" : "ACTIVE",
         },
       });
 
-      // 4. Ghi vết kiểm toán
+      // --- D. GHI NHẬT KÝ KIỂM TOÁN (AUDIT LOG) ---
       await tx.loanAuditLog.create({
         data: {
           loanId,
-          action: "CORRECT_ORIGINAL_PRINCIPAL",
-          fieldName: "originalPrincipal",
-          oldValue: `${oldOriginal.toLocaleString("vi-VN")} đ (Gốc còn: ${oldRemaining.toLocaleString("vi-VN")} đ)`,
-          newValue: `${newOriginal.toLocaleString("vi-VN")} đ (Gốc còn lại tự tính: ${newRemaining.toLocaleString("vi-VN")} đ)`,
+          action: "RECALCULATE_TERMS",
+          fieldName: "originalPrincipal & interest",
+          oldValue: `Gốc: ${Number(loan.remainingPrincipal).toLocaleString("vi-VN")} đ | Lãi nợ: ${Number(loan.accruedInterest).toLocaleString("vi-VN")} đ`,
+          newValue: `Gốc: ${newRemaining.toLocaleString("vi-VN")} đ | Lãi nợ mới (${daysPassed} ngày): ${newAccruedInterest.toLocaleString("vi-VN")} đ`,
           reason,
         },
       });
@@ -322,7 +378,7 @@ export async function adjustLoanAmountsAction(
     revalidatePath("/");
     return { success: true };
   } catch (err) {
-    console.error("Lỗi khi sửa tiền gốc:", err);
-    return { error: "Không thể chỉnh sửa tiền gốc. Vui lòng thử lại." };
+    console.error("Lỗi khi đính chính gốc và tính lại lãi:", err);
+    return { error: "Không thể cập nhật thông tin. Vui lòng thử lại." };
   }
 }
